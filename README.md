@@ -21,9 +21,9 @@ CAFEMO functions as a digital kiosk for a cafe, allowing customers to browse the
 - Considers environment/context such as weather or time of day:
   - Example: if it is sunny/hot, prioritize cold drinks; if it is cold, prioritize hot drinks.
 - Interprets vague statements and maps them to closest matching menu items using prior preferences and simple semantic matching. For example, from a vague phrase like "something refreshing", recommend chilled citrus drinks or iced specialties, weighted by user taste history.
-  - "pag sad" -> return favorite/most-ordered
-  - "pag curious" -> suggest something new
-  - "pag maaraw" -> prefer cold drinks
+  - "sad" -> return favorite/most-ordered
+  - "curious" -> suggest something new
+  - "maaraw" -> prefer cold drinks
 
 ### Recommendation Logic (technical)
 
