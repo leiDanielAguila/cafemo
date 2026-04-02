@@ -32,7 +32,7 @@ export default function LoginPage() {
     notifications.show({
       color: "teal",
       title: "Welcome back",
-      message: "You&apos;re in. Your favorite barista is ready.",
+      message: "You're in. Your favorite barista is ready.",
     });
   };
 

@@ -33,8 +33,8 @@ export default function SignupPage() {
 		if (password !== confirmPassword) {
 			notifications.show({
 				color: "red",
-				title: "Passwords don&apos;t match",
-				message: "Let&apos;s try that again so your account brews correctly.",
+				title: "Passwords don't match",
+				message: "Let's try that again so your account brews correctly.",
 			});
 			return;
 		}
@@ -42,7 +42,7 @@ export default function SignupPage() {
 		notifications.show({
 			color: "teal",
 			title: "Account brewed",
-			message: "You&apos;re all set. Your cozy corner is waiting.",
+			message: "You're all set. Your cozy corner is waiting.",
 		});
 	};
 
