@@ -2,8 +2,9 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 
-type OrderStage = "GATHERING" | "PROCESSING" | "COMPLETED";
+type OrderStage = "GATHERING" | "PROCESSING" | "COMPLETED" | "CANCELLED";
 type ChatRole = "user" | "assistant";
 
 type ChatMessage = {
@@ -33,6 +34,20 @@ function createId(prefix: string) {
 function hasExplicitOrderConfirmation(message: string) {
   const normalized = message.toLowerCase();
   return /(confirm|that's all|that is all|finalize|place order|checkout|yes|go ahead)/.test(
+    normalized,
+  );
+}
+
+function hasCancelOrderIntent(message: string) {
+  const normalized = message.toLowerCase();
+  return /(cancel|cancell?ed|don'?t proceed|do not proceed|not proceed|stop order|abort order|never mind|nevermind|forget it)/.test(
+    normalized,
+  );
+}
+
+function hasAssistantCancellationConfirmation(message: string) {
+  const normalized = message.toLowerCase();
+  return /(order (is )?(cancelled|canceled)|canceled this order|cancelled this order)/.test(
     normalized,
   );
 }
@@ -110,6 +125,20 @@ export default function KioskClientPage() {
   );
 
   const heroIsSpeaking = isHydrated && (isThinking || isAnimatingReply);
+  const isTerminalStage =
+    orderStage === "COMPLETED" || orderStage === "CANCELLED";
+  const terminalStatusText =
+    orderStage === "COMPLETED"
+      ? "Order completed. Input is now locked."
+      : "Order canceled. Input is now locked.";
+  const terminalPlaceholder =
+    orderStage === "COMPLETED"
+      ? "Order completed"
+      : orderStage === "CANCELLED"
+        ? "Order canceled"
+        : orderStage === "PROCESSING"
+          ? "Processing order..."
+          : "Type your order here";
 
   async function animateAssistantReply(
     placeholderId: string,
@@ -169,6 +198,23 @@ export default function KioskClientPage() {
       content: userContent,
     };
 
+    if (hasCancelOrderIntent(userContent)) {
+      setInput("");
+      setOrderStage("CANCELLED");
+      setMessages((previous) => [
+        ...previous,
+        userMessage,
+        {
+          id: createId("assistant"),
+          role: "assistant",
+          content:
+            "No problem — I canceled this order. Tap Start New Order whenever you're ready.",
+          uiOnly: true,
+        },
+      ]);
+      return;
+    }
+
     const placeholderId = createId("assistant-pending");
     const placeholderMessage: ChatMessage = {
       id: placeholderId,
@@ -217,6 +263,11 @@ export default function KioskClientPage() {
         "I’m sorry, I couldn’t process that. Please tell me your order one more time.";
 
       await animateAssistantReply(placeholderId, assistantReply);
+
+      if (hasAssistantCancellationConfirmation(assistantReply)) {
+        setOrderStage("CANCELLED");
+        return;
+      }
 
       if (data.isFinalized && hasExplicitOrderConfirmation(userContent)) {
         setOrderStage("PROCESSING");
@@ -277,10 +328,10 @@ export default function KioskClientPage() {
               {processingStep}
             </p>
           )}
-          {orderStage === "COMPLETED" && (
+          {isTerminalStage && (
             <>
               <p className="mt-3 text-sm font-medium text-[var(--color-violet)]">
-                Order completed. Input is now locked.
+                {terminalStatusText}
               </p>
               <button
                 type="button"
@@ -324,13 +375,7 @@ export default function KioskClientPage() {
             <input
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder={
-                orderStage === "COMPLETED"
-                  ? "Order completed"
-                  : orderStage === "PROCESSING"
-                    ? "Processing order..."
-                    : "Type your order here"
-              }
+              placeholder={terminalPlaceholder}
               disabled={
                 orderStage !== "GATHERING" || isThinking || isAnimatingReply
               }
@@ -343,6 +388,16 @@ export default function KioskClientPage() {
               style={{ backgroundColor: "#5b5fd0" }}
             >
               Send
+            </button>
+            <button
+              type="button"
+              onClick={handleStartNewOrder}
+              aria-label="Restart order"
+              title="Restart order"
+              className="rounded-xl p-3 text-white transition hover:opacity-95"
+              style={{ backgroundColor: "#5b5fd0" }}
+            >
+              <ArrowClockwiseIcon size={18} weight="bold" />
             </button>
           </form>
         </div>
