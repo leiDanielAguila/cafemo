@@ -137,31 +137,16 @@ export default function SignupPage() {
       return;
     }
 
-    const { data: user, error: profileError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { display_name: displayName, address },
-      },
-    });
-
-    if (profileError) {
-      notifications.show({
-        color: "red",
-        title: "Account created, profile failed",
-        message: profileError.message,
-      });
-      setIsSubmitting(false);
-      return;
-    }
-
     notifications.show({
       color: "teal",
       title: "Account brewed",
       message: "You're all set. Your cozy corner is waiting.",
     });
 
-    router.replace("/dashboard/kiosk");
+    
+    setTimeout(() => {
+      router.replace("/dashboard/kiosk");
+    }, 2000);
     setIsSubmitting(false);
   };
 

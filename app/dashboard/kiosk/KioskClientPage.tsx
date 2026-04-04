@@ -18,7 +18,7 @@ type ChatMessage = {
 const HERO_SIZE = 250;
 const TYPING_DELAY_MS = 22;
 const dummy = "John Doe";
-const [displayName, setDisplayName] = useState('');
+
 
 const initialMessages: ChatMessage[] = [
   {
