@@ -12,12 +12,15 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useUserStore } from "@/app/lib/store/useUserStore";
+import { mapSupabaseUserToProfile } from "@/app/lib/userProfile";
 import { createClient } from "@/app/utils/supabase/client";
 
 export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const setUser = useUserStore((state) => state.setUser);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,7 +41,7 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -51,6 +54,10 @@ export default function LoginPage() {
       });
       setIsSubmitting(false);
       return;
+    }
+
+    if (data.user) {
+      setUser(mapSupabaseUserToProfile(data.user));
     }
 
     notifications.show({

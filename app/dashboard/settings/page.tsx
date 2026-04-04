@@ -1,12 +1,14 @@
-"use client"
+"use client";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useUserStore } from "@/app/lib/store/useUserStore";
 import { createClient } from "@/app/utils/supabase/client";
 export default function SettingsPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const resetUser = useUserStore((state) => state.resetUser);
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
 
@@ -19,7 +21,9 @@ export default function SettingsPage() {
       return;
     }
 
-    router.replace("/auth/login")
+    resetUser();
+
+    router.replace("/auth/login");
   };
 
   return (

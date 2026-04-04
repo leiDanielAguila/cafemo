@@ -2,7 +2,11 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
+import { useUserStore } from "@/app/lib/store/useUserStore";
+import { mapSupabaseUserToProfile } from "@/app/lib/userProfile";
+import { createClient } from "@/app/utils/supabase/client";
 
 type OrderStage = "GATHERING" | "PROCESSING" | "COMPLETED" | "CANCELLED";
 type ChatRole = "user" | "assistant";
@@ -17,16 +21,14 @@ type ChatMessage = {
 
 const HERO_SIZE = 250;
 const TYPING_DELAY_MS = 22;
-const dummy = "John Doe";
 
-
-const initialMessages: ChatMessage[] = [
-  {
+function createWelcomeMessage(name: string): ChatMessage {
+  return {
     id: "welcome",
     role: "assistant",
-    content: `Hey ${dummy}, welcome to CafeMo. Tell me what you’d like today and I’ll help finalize your order.`,
-  },
-];
+    content: `Hey ${name}, welcome to CafeMo. Tell me what you’d like today and I’ll help finalize your order.`,
+  };
+}
 
 function createId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -54,14 +56,34 @@ function hasAssistantCancellationConfirmation(message: string) {
 }
 
 export default function KioskClientPage() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const displayName = useUserStore((state) => state.displayName);
+  const email = useUserStore((state) => state.email);
+  const address = useUserStore((state) => state.address);
+  const setUser = useUserStore((state) => state.setUser);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const greetingName = useMemo(() => {
+    const trimmedDisplayName = displayName.trim();
+    if (trimmedDisplayName) {
+      return trimmedDisplayName;
+    }
+
+    const emailPrefix = email.split("@")[0]?.trim();
+    return emailPrefix || "there";
+  }, [displayName, email]);
+  const initialMessages = useMemo(
+    () => [createWelcomeMessage(greetingName)],
+    [greetingName],
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => initialMessages,
+  );
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isAnimatingReply, setIsAnimatingReply] = useState(false);
   const [orderStage, setOrderStage] = useState<OrderStage>("GATHERING");
   const [processingStep, setProcessingStep] = useState<string>("");
-  const [displayName, setDisplayName] = useState<String>("");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
 
@@ -69,7 +91,44 @@ export default function KioskClientPage() {
     setIsHydrated(true);
   }, []);
 
-  
+  useEffect(() => {
+    setMessages((previous) => {
+      if (
+        previous.length !== 1 ||
+        previous[0]?.id !== "welcome" ||
+        previous[0].content === initialMessages[0].content
+      ) {
+        return previous;
+      }
+
+      return initialMessages;
+    });
+  }, [initialMessages]);
+
+  useEffect(() => {
+    const hasUserInStore =
+      displayName.trim().length > 0 ||
+      email.trim().length > 0 ||
+      address.trim().length > 0;
+
+    if (hasUserInStore) {
+      return;
+    }
+
+    const hydrateUser = async () => {
+      const { data } = await supabase.auth.getUser();
+
+      if (!data.user) {
+        router.replace("/auth/login");
+        return;
+      }
+
+      setUser(mapSupabaseUserToProfile(data.user));
+    };
+
+    hydrateUser();
+  }, [address, displayName, email, router, setUser, supabase]);
+
   useEffect(() => {
     return () => {
       isMountedRef.current = false;

@@ -13,6 +13,8 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useUserStore } from "@/app/lib/store/useUserStore";
+import { createProfileFromSignupForm } from "@/app/lib/userProfile";
 import { createClient } from "@/app/utils/supabase/client";
 
 const passwordRules = [
@@ -43,6 +45,7 @@ export default function SignupPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const setUser = useUserStore((state) => state.setUser);
 
   const passwordScore = passwordRules.reduce(
     (score, rule) => score + (rule.test(password) ? 1 : 0),
@@ -137,16 +140,23 @@ export default function SignupPage() {
       return;
     }
 
+    setUser(
+      createProfileFromSignupForm({
+        displayName,
+        email,
+        address,
+      }),
+    );
+
     notifications.show({
       color: "teal",
       title: "Account brewed",
       message: "You're all set. Your cozy corner is waiting.",
     });
 
-    
     setTimeout(() => {
       router.replace("/dashboard/kiosk");
-    }, 2000);
+    }, 1500);
     setIsSubmitting(false);
   };
 
