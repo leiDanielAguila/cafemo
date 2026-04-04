@@ -130,6 +130,8 @@ export default function KioskClientPage() {
   }, [address, displayName, email, router, setUser, supabase]);
 
   useEffect(() => {
+    isMountedRef.current = true;
+
     return () => {
       isMountedRef.current = false;
     };
@@ -206,6 +208,23 @@ export default function KioskClientPage() {
     placeholderId: string,
     fullReply: string,
   ): Promise<void> {
+    const replyToAnimate = fullReply.trim();
+    if (!replyToAnimate) {
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === placeholderId
+            ? {
+                id: placeholderId,
+                role: "assistant",
+                content:
+                  "I’m sorry, I couldn’t process that. Please tell me your order one more time.",
+              }
+            : message,
+        ),
+      );
+      return;
+    }
+
     setIsAnimatingReply(true);
     setMessages((previous) =>
       previous.map((message) =>
@@ -213,36 +232,38 @@ export default function KioskClientPage() {
           ? {
               id: placeholderId,
               role: "assistant",
-              content: "",
+              content: replyToAnimate[0],
             }
           : message,
       ),
     );
 
-    for (let index = 1; index <= fullReply.length; index += 1) {
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, TYPING_DELAY_MS);
-      });
+    try {
+      for (let index = 2; index <= replyToAnimate.length; index += 1) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, TYPING_DELAY_MS);
+        });
 
-      if (!isMountedRef.current) {
-        return;
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        const partialReply = replyToAnimate.slice(0, index);
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === placeholderId
+              ? {
+                  ...message,
+                  content: partialReply,
+                }
+              : message,
+          ),
+        );
       }
-
-      const partialReply = fullReply.slice(0, index);
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.id === placeholderId
-            ? {
-                ...message,
-                content: partialReply,
-              }
-            : message,
-        ),
-      );
-    }
-
-    if (isMountedRef.current) {
-      setIsAnimatingReply(false);
+    } finally {
+      if (isMountedRef.current) {
+        setIsAnimatingReply(false);
+      }
     }
   }
 
