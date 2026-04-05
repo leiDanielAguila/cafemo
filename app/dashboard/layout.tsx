@@ -30,6 +30,7 @@ export default async function DashboardLayout({
               height={36}
               priority
               className="rounded-lg"
+              style={{ height: "auto" }}
             />
             <span className="text-lg font-semibold text-[var(--color-charcoal)]">
               CafeMo

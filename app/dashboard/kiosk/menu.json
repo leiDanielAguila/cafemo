@@ -4,7 +4,6 @@
       {
         "category": "Hot",
         "items": [
-          { "name": "Espresso", "price": 181.23 },
           { "name": "Americano", "price": 211.44 },
           { "name": "Caffe Latte", "price": 256.74 },
           { "name": "Cappuccino", "price": 256.74 },
@@ -15,17 +14,13 @@
         "category": "Cold",
         "items": [
           { "name": "Iced Americano", "price": 226.54 },
-          { "name": "Iced Latte", "price": 271.84 },
-          { "name": "Cold Brew", "price": 271.84 },
-          { "name": "Iced Tea", "price": 196.33 },
+          { "name": "Iced Latte", "price": 271.84 },          
           { "name": "Peach Smoothie", "price": 332.25 }
         ]
       }
     ],
     "food": [
       { "name": "Butter Croissant", "price": 226.54 },
-      { "name": "Blueberry Muffin", "price": 211.44 },
-      { "name": "Avocado Toast", "price": 513.49 },
       { "name": "Breakfast Burrito", "price": 543.69 },
       { "name": "Ham & Cheese Panini", "price": 634.3 }
     ],
