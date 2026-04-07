@@ -41,7 +41,7 @@ export default function DashboardNav() {
                 <Link
                   href={item.href}
                   aria-current={isActive ? "page" : undefined}
-                  className={`block px-3 py-2 text-center text-sm font-medium transition-colors md:px-4 ${
+                  className={`block px-3 py-2 text-center text-sm font-bold transition-colors md:px-4 ${
                     isActive
                       ? "text-white"
                       : "text-[var(--color-charcoal)] hover:text-[var(--color-violet)]"

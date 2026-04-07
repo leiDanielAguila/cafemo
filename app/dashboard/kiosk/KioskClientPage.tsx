@@ -463,10 +463,10 @@ export default function KioskClientPage() {
           )}
         </aside>
 
-        <div className="glass-card flex min-h-[70vh] flex-1 flex-col rounded-3xl p-4 md:p-6">
+        <div className="glass-card flex h-[70vh] min-h-0 flex-1 flex-col rounded-3xl p-4 md:p-6">
           <div
             ref={scrollContainerRef}
-            className="flex-1 space-y-3 overflow-y-auto rounded-2xl p-4"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl p-4"
             style={{ backgroundColor: "#9bb29e" }}
           >
             {messages.map((message) => {
@@ -477,7 +477,7 @@ export default function KioskClientPage() {
                   className={`flex ${fromUser ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed text-[var(--color-charcoal)] md:max-w-[70%] ${
+                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-md leading-relaxed text-[var(--color-charcoal)] md:max-w-[70%] ${
                       fromUser ? "rounded-br-sm" : "rounded-bl-sm"
                     }`}
                     style={{ backgroundColor: "#ffffff" }}
