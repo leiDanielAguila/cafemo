@@ -17,10 +17,16 @@ import {
   normalizeLabel,
   resolveMenuImagePath,
 } from "@/app/lib/menu";
+import {
+  loadPendingOrderFromStorage,
+  type PendingOrder,
+  parseOrderItemsFromText,
+  savePendingOrderToStorage,
+} from "@/app/lib/orderFlow";
 import { useMenuDataQuery } from "@/app/lib/useMenuDataQuery";
 import { createClient } from "@/app/utils/supabase/client";
 
-type OrderStage = "GATHERING" | "PROCESSING" | "COMPLETED" | "CANCELLED";
+type OrderStage = "GATHERING" | "CANCELLED";
 type ChatRole = "user" | "assistant";
 
 type ChatMenuCard = {
@@ -56,6 +62,13 @@ function createId(prefix: string) {
 function hasExplicitOrderConfirmation(message: string) {
   const normalized = message.toLowerCase();
   return /(confirm|that's all|that is all|finalize|place order|checkout|yes|go ahead)/.test(
+    normalized,
+  );
+}
+
+function hasAssistantOrderCompletionCue(message: string) {
+  const normalized = message.toLowerCase();
+  return /(order (is )?(confirmed|placed|finalized)|thank(s| you) for ordering|on (the )?way|in progress|will be prepared)/.test(
     normalized,
   );
 }
@@ -147,6 +160,105 @@ function createCardsForMessage(
   });
 }
 
+function buildPendingOrderFromUserMessages(input: {
+  userMessages: string[];
+  displayName: string;
+  address: string;
+}): PendingOrder | null {
+  const aggregatedByItem = new Map<
+    string,
+    ReturnType<typeof parseOrderItemsFromText>[number]
+  >();
+
+  for (const message of input.userMessages) {
+    const parsedItems = parseOrderItemsFromText(message);
+
+    for (const parsedItem of parsedItems) {
+      const key = `${parsedItem.itemType}:${parsedItem.itemId}`;
+      const existing = aggregatedByItem.get(key);
+
+      if (!existing) {
+        aggregatedByItem.set(key, { ...parsedItem });
+        continue;
+      }
+
+      if (parsedItem.quantity > existing.quantity) {
+        aggregatedByItem.set(key, {
+          ...existing,
+          quantity: parsedItem.quantity,
+          lineTotal: Number.parseFloat(
+            (parsedItem.quantity * existing.unitPrice).toFixed(2),
+          ),
+        });
+      }
+    }
+  }
+
+  const items = Array.from(aggregatedByItem.values());
+  if (items.length === 0) {
+    return null;
+  }
+
+  const totalAmount = Number.parseFloat(
+    items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2),
+  );
+
+  return {
+    items,
+    totalAmount,
+    displayName: input.displayName.trim(),
+    address: input.address.trim(),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function mergePendingOrders(
+  existingOrder: PendingOrder | null,
+  incomingOrder: PendingOrder,
+): PendingOrder {
+  if (!existingOrder) {
+    return incomingOrder;
+  }
+
+  const mergedByItem = new Map<string, PendingOrder["items"][number]>();
+
+  for (const item of existingOrder.items) {
+    mergedByItem.set(`${item.itemType}:${item.itemId}`, { ...item });
+  }
+
+  for (const item of incomingOrder.items) {
+    const key = `${item.itemType}:${item.itemId}`;
+    const existing = mergedByItem.get(key);
+
+    if (!existing) {
+      mergedByItem.set(key, { ...item });
+      continue;
+    }
+
+    const mergedQuantity = existing.quantity + item.quantity;
+    mergedByItem.set(key, {
+      ...existing,
+      quantity: mergedQuantity,
+      lineTotal: Number.parseFloat(
+        (mergedQuantity * existing.unitPrice).toFixed(2),
+      ),
+    });
+  }
+
+  const mergedItems = Array.from(mergedByItem.values());
+  const mergedTotalAmount = Number.parseFloat(
+    mergedItems.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2),
+  );
+
+  return {
+    items: mergedItems,
+    totalAmount: mergedTotalAmount,
+    displayName: incomingOrder.displayName || existingOrder.displayName,
+    address: incomingOrder.address || existingOrder.address,
+    createdAt: existingOrder.createdAt,
+  };
+}
+
 export default function KioskClientPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -175,9 +287,9 @@ export default function KioskClientPage() {
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isAnimatingReply, setIsAnimatingReply] = useState(false);
+  const [isFinalizingOrder, setIsFinalizingOrder] = useState(false);
   const [isMenuSidebarOpen, setIsMenuSidebarOpen] = useState(false);
   const [orderStage, setOrderStage] = useState<OrderStage>("GATHERING");
-  const [processingStep, setProcessingStep] = useState<string>("");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const menuCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -261,65 +373,21 @@ export default function KioskClientPage() {
     };
   }, [isMenuSidebarOpen]);
 
-  useEffect(() => {
-    if (orderStage !== "PROCESSING") {
-      return;
-    }
-
-    setProcessingStep("Checking inventory…");
-
-    const inventoryTimer = window.setTimeout(() => {
-      setProcessingStep("Pushing order to kitchen queue…");
-
-      const kitchenTimer = window.setTimeout(() => {
-        setProcessingStep("");
-        setOrderStage("COMPLETED");
-        setMessages((previous) => [
-          ...previous,
-          {
-            id: createId("assistant"),
-            role: "assistant",
-            content:
-              "Your order is confirmed and in progress. Thanks for ordering with CAFEMO!",
-            uiOnly: true,
-          },
-        ]);
-      }, 1700);
-
-      return () => {
-        window.clearTimeout(kitchenTimer);
-      };
-    }, 1500);
-
-    return () => {
-      window.clearTimeout(inventoryTimer);
-    };
-  }, [orderStage]);
-
   const canSend = useMemo(
     () =>
       input.trim().length > 0 &&
       orderStage === "GATHERING" &&
       !isThinking &&
-      !isAnimatingReply,
-    [input, orderStage, isThinking, isAnimatingReply],
+      !isAnimatingReply &&
+      !isFinalizingOrder,
+    [input, orderStage, isThinking, isAnimatingReply, isFinalizingOrder],
   );
 
   const heroIsSpeaking = isHydrated && (isThinking || isAnimatingReply);
-  const isTerminalStage =
-    orderStage === "COMPLETED" || orderStage === "CANCELLED";
-  const terminalStatusText =
-    orderStage === "COMPLETED"
-      ? "Order completed. Input is now locked."
-      : "Order canceled. Input is now locked.";
+  const isTerminalStage = orderStage === "CANCELLED";
+  const terminalStatusText = "Order canceled. Input is now locked.";
   const terminalPlaceholder =
-    orderStage === "COMPLETED"
-      ? "Order completed"
-      : orderStage === "CANCELLED"
-        ? "Order canceled"
-        : orderStage === "PROCESSING"
-          ? "Processing order..."
-          : "Type your order here";
+    orderStage === "CANCELLED" ? "Order canceled" : "Type your order here";
 
   async function animateAssistantReply(
     placeholderId: string,
@@ -491,8 +559,65 @@ export default function KioskClientPage() {
         return;
       }
 
-      if (data.isFinalized && hasExplicitOrderConfirmation(userContent)) {
-        setOrderStage("PROCESSING");
+      const confirmedInHistory = historyForApi
+        .filter((message) => message.role === "user")
+        .some((message) => hasExplicitOrderConfirmation(message.content));
+      const shouldFinalizeOrder =
+        data.isFinalized ||
+        (confirmedInHistory && hasAssistantOrderCompletionCue(assistantReply));
+
+      if (shouldFinalizeOrder) {
+        setIsFinalizingOrder(true);
+
+        const userMessages = historyForApi
+          .filter((message) => message.role === "user")
+          .map((message) => message.content);
+
+        const pendingOrder = buildPendingOrderFromUserMessages({
+          userMessages,
+          displayName: greetingName,
+          address,
+        });
+
+        if (!pendingOrder) {
+          setIsFinalizingOrder(false);
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: createId("assistant"),
+              role: "assistant",
+              content:
+                "I confirmed your order, but I couldn’t extract line items yet. Please resend the order with item names and sizes before finalizing.",
+              uiOnly: true,
+            },
+          ]);
+          return;
+        }
+
+        const existingPendingOrder = loadPendingOrderFromStorage();
+        const mergedPendingOrder = mergePendingOrders(
+          existingPendingOrder,
+          pendingOrder,
+        );
+
+        savePendingOrderToStorage(mergedPendingOrder);
+        setMessages((previous) => [
+          ...previous,
+          {
+            id: createId("assistant"),
+            role: "assistant",
+            content:
+              "Order confirmed. Opening your tracking page in 3 seconds...",
+            uiOnly: true,
+          },
+        ]);
+
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 3000);
+        });
+
+        router.push("/dashboard/track-order");
+        return;
       }
     } catch (error) {
       setIsAnimatingReply(false);
@@ -510,6 +635,7 @@ export default function KioskClientPage() {
         ),
       );
     } finally {
+      setIsFinalizingOrder(false);
       setIsThinking(false);
     }
   }
@@ -519,7 +645,7 @@ export default function KioskClientPage() {
     setInput("");
     setIsThinking(false);
     setIsAnimatingReply(false);
-    setProcessingStep("");
+    setIsFinalizingOrder(false);
     setOrderStage("GATHERING");
   }
 
@@ -561,11 +687,6 @@ export default function KioskClientPage() {
           <p className="mt-2 text-sm text-[var(--color-charcoal)]/80">
             Stage: <span className="font-semibold">{orderStage}</span>
           </p>
-          {orderStage === "PROCESSING" && (
-            <p className="mt-3 text-sm font-medium text-[var(--color-violet)]">
-              {processingStep}
-            </p>
-          )}
           {isTerminalStage && (
             <>
               <p className="mt-3 text-sm font-medium text-[var(--color-violet)]">
@@ -652,7 +773,10 @@ export default function KioskClientPage() {
               onChange={(event) => setInput(event.target.value)}
               placeholder={terminalPlaceholder}
               disabled={
-                orderStage !== "GATHERING" || isThinking || isAnimatingReply
+                orderStage !== "GATHERING" ||
+                isThinking ||
+                isAnimatingReply ||
+                isFinalizingOrder
               }
               className="flex-1 rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm text-[var(--color-charcoal)] outline-none transition focus:border-[var(--color-violet)]"
             />

@@ -96,6 +96,15 @@ To run the app locally with Supabase integration:
 - Client-side views use TanStack Query cache to reuse fetched menu data across pages.
 - Chat prompt menu text is built server-side from Supabase and cached for 5 minutes to reduce repeated DB reads.
 
+### Order Tracking Flow
+
+- After chat order confirmation in `/dashboard/kiosk`, the app extracts order line-items and stores a pending order in browser storage.
+- The user is redirected to `/dashboard/track-order` with three steps: **Confirm → Preparing → Delivery**.
+- Preparing is mocked at 10 seconds, and Delivery is mocked at 30 seconds.
+- Database insertion happens **only when delivery is marked complete**:
+  - `orders` row is inserted first (`profile_id`, `total_amount`)
+  - `order_items` rows are inserted next (`order_id`, `item_id`, `item_type`, `quantity`, `price_at_purchase`)
+
 ### Deployment
 
 You can deploy the app to Vercel or any platform that supports Next.js. Ensure environment variables for Supabase are set in the deployment settings.
