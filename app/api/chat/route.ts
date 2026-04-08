@@ -1,4 +1,6 @@
-import { addOns, beverages, food, formatPrice } from "@/app/lib/menu";
+import { formatPrice } from "@/app/lib/menu";
+import { fetchMenuData } from "@/app/lib/menuData";
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 type ApiChatMessage = {
@@ -7,45 +9,103 @@ type ApiChatMessage = {
 };
 
 const FINALIZED_TOKEN = "[FINALIZED]";
+const MENU_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const BEVERAGE_MENU_TEXT = beverages
-  .flatMap((group) => group.items)
-  .map(
-    (item) =>
-      `- ${item.name} (small: ${formatPrice(item.sizes.small)}, medium: ${formatPrice(item.sizes.medium)}, large: ${formatPrice(item.sizes.large)})`,
-  )
-  .join("\n");
+let systemPromptCache: {
+  value: string;
+  expiresAt: number;
+} | null = null;
 
-const NON_BEVERAGE_MENU_TEXT = [...food, ...addOns]
-  .map((item) => `- ${item.name} (${formatPrice(item.price)})`)
-  .join("\n");
+function buildSystemPrompt(menuText: string) {
+  return [
+    "You are CAFEMO, a warm and concise kiosk ordering assistant.",
+    "You are ONLY for taking cafe orders from the exact menu below.",
+    "Menu (exact names and prices):",
+    menuText,
+    "Task rules:",
+    "- When providing a response for prices respond with the Pesos sign as for PHP",
+    "- When a client mentions he/she is sad recommend warm hot drinks vice versa for happiness should be cold drinks",
+    "- If a user requests an item not in the menu, gently ask them to check the menu and order from available items only.",
+    "- If a user asks for anything unrelated to ordering, gently explain you are only for cafe ordering tasks.",
+    "- Emotional chats are allowed only when still connected to coffee/ordering recommendations (for example: feeling sad today, or having a great day).",
+    "- Any recommendation must be real menu items listed above.",
+    "- Never invent items, prices, or gibberish names.",
+    "- When a user says he wont order anymore proceed to stop the order.",
+    "Tone rules:",
+    "- Be friendly, short, and clear.",
+    "- Ask at most one follow-up question at a time.",
+    "- Confirm order details before finalizing.",
+    "Critical instruction:",
+    `- When the user has fully confirmed their order, append the exact token ${FINALIZED_TOKEN} at the end of your response.`,
+    "- Do not add the token before the order is fully confirmed.",
+  ].join("\n");
+}
 
-const MENU_TEXT = [BEVERAGE_MENU_TEXT, NON_BEVERAGE_MENU_TEXT]
-  .filter((text) => text.length > 0)
-  .join("\n");
+async function getSystemPrompt() {
+  const now = Date.now();
+  if (systemPromptCache && systemPromptCache.expiresAt > now) {
+    return systemPromptCache.value;
+  }
 
-const SYSTEM_PROMPT = [
-  "You are CAFEMO, a warm and concise kiosk ordering assistant.",
-  "You are ONLY for taking cafe orders from the exact menu below.",
-  "Menu (exact names and prices):",
-  MENU_TEXT,
-  "Task rules:",
-  "- When providing a response for prices respond with the Pesos sign as for PHP",
-  "- When a client mentions he/she is sad recommend warm hot drinks vice versa for happiness should be cold drinks",
-  "- If a user requests an item not in the menu, gently ask them to check the menu and order from available items only.",
-  "- If a user asks for anything unrelated to ordering, gently explain you are only for cafe ordering tasks.",
-  "- Emotional chats are allowed only when still connected to coffee/ordering recommendations (for example: feeling sad today, or having a great day).",
-  "- Any recommendation must be real menu items listed above.",
-  "- Never invent items, prices, or gibberish names.",
-  "- When a user says he wont order anymore proceed to stop the order.",
-  "Tone rules:",
-  "- Be friendly, short, and clear.",
-  "- Ask at most one follow-up question at a time.",
-  "- Confirm order details before finalizing.",
-  "Critical instruction:",
-  `- When the user has fully confirmed their order, append the exact token ${FINALIZED_TOKEN} at the end of your response.`,
-  "- Do not add the token before the order is fully confirmed.",
-].join("\n");
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const publishableKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+  const supabaseKey = serviceRoleKey ?? publishableKey;
+
+  if (!supabaseUrl || !supabaseKey) {
+    if (systemPromptCache) {
+      return systemPromptCache.value;
+    }
+
+    return buildSystemPrompt(
+      "- Menu is temporarily unavailable. Please ask the user to try again shortly.",
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  try {
+    const menuData = await fetchMenuData(supabase);
+
+    const beverageMenuText = menuData.beverages
+      .flatMap((group) => group.items)
+      .map(
+        (item) =>
+          `- ${item.name} (small: ${formatPrice(item.sizes.small)}, medium: ${formatPrice(item.sizes.medium)}, large: ${formatPrice(item.sizes.large)})`,
+      )
+      .join("\n");
+
+    const nonBeverageMenuText = [...menuData.food, ...menuData.addOns]
+      .map((item) => `- ${item.name} (${formatPrice(item.price)})`)
+      .join("\n");
+
+    const menuText = [beverageMenuText, nonBeverageMenuText]
+      .filter((text) => text.length > 0)
+      .join("\n");
+
+    const systemPrompt = buildSystemPrompt(menuText);
+    systemPromptCache = {
+      value: systemPrompt,
+      expiresAt: now + MENU_PROMPT_CACHE_TTL_MS,
+    };
+
+    return systemPrompt;
+  } catch {
+    if (systemPromptCache) {
+      return systemPromptCache.value;
+    }
+
+    return buildSystemPrompt(
+      "- Menu is temporarily unavailable. Please ask the user to try again shortly.",
+    );
+  }
+}
 
 function normalizeReply(rawReply: string) {
   const trimmed = rawReply.trim();
@@ -101,6 +161,8 @@ export async function POST(request: Request) {
       );
     }
 
+    const systemPrompt = await getSystemPrompt();
+
     const groqResponse = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -115,7 +177,7 @@ export async function POST(request: Request) {
           messages: [
             {
               role: "system",
-              content: SYSTEM_PROMPT,
+              content: systemPrompt,
             },
             ...safeMessages,
           ],

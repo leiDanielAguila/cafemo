@@ -3,15 +3,21 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { ArrowClockwiseIcon, ImageSquareIcon } from "@phosphor-icons/react";
+import {
+  ArrowClockwiseIcon,
+  ImageSquareIcon,
+  ListIcon,
+} from "@phosphor-icons/react";
 import { useUserStore } from "@/app/lib/store/useUserStore";
 import { mapSupabaseUserToProfile } from "@/app/lib/userProfile";
 import {
+  type MatchedMenuItem,
   findTopMatchedMenuItemsByAppearance,
   formatPrice,
   normalizeLabel,
   resolveMenuImagePath,
 } from "@/app/lib/menu";
+import { useMenuDataQuery } from "@/app/lib/useMenuDataQuery";
 import { createClient } from "@/app/utils/supabase/client";
 
 type OrderStage = "GATHERING" | "PROCESSING" | "COMPLETED" | "CANCELLED";
@@ -110,8 +116,11 @@ function detectMentionedSize(
   return null;
 }
 
-function createCardsForMessage(text: string): ChatMenuCard[] {
-  return findTopMatchedMenuItemsByAppearance(text, 3).map((item) => {
+function createCardsForMessage(
+  text: string,
+  menuItems: MatchedMenuItem[],
+): ChatMenuCard[] {
+  return findTopMatchedMenuItemsByAppearance(text, menuItems, 3).map((item) => {
     if (!item.sizes) {
       return {
         name: item.name,
@@ -141,6 +150,7 @@ function createCardsForMessage(text: string): ChatMenuCard[] {
 export default function KioskClientPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const { data, flattenedMenuItems } = useMenuDataQuery();
   const displayName = useUserStore((state) => state.displayName);
   const email = useUserStore((state) => state.email);
   const address = useUserStore((state) => state.address);
@@ -165,10 +175,15 @@ export default function KioskClientPage() {
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [isAnimatingReply, setIsAnimatingReply] = useState(false);
+  const [isMenuSidebarOpen, setIsMenuSidebarOpen] = useState(false);
   const [orderStage, setOrderStage] = useState<OrderStage>("GATHERING");
   const [processingStep, setProcessingStep] = useState<string>("");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
+  const menuCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const beverages = data?.beverages ?? [];
+  const food = data?.food ?? [];
+  const addOns = data?.addOns ?? [];
 
   useEffect(() => {
     setIsHydrated(true);
@@ -226,6 +241,25 @@ export default function KioskClientPage() {
       container.scrollTop = container.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (!isMenuSidebarOpen) {
+      return;
+    }
+
+    menuCloseButtonRef.current?.focus();
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMenuSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isMenuSidebarOpen]);
 
   useEffect(() => {
     if (orderStage !== "PROCESSING") {
@@ -416,7 +450,11 @@ export default function KioskClientPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to fetch assistant response.");
+        const errorPayload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        const errorMessage = errorPayload?.error?.trim();
+        throw new Error(errorMessage || "Failed to fetch assistant response.");
       }
 
       const data = (await response.json()) as {
@@ -430,7 +468,10 @@ export default function KioskClientPage() {
 
       await animateAssistantReply(placeholderId, assistantReply);
 
-      const assistantCards = createCardsForMessage(assistantReply);
+      const assistantCards = createCardsForMessage(
+        assistantReply,
+        flattenedMenuItems,
+      );
 
       setMessages((previous) =>
         previous.map((message) => {
@@ -453,16 +494,17 @@ export default function KioskClientPage() {
       if (data.isFinalized && hasExplicitOrderConfirmation(userContent)) {
         setOrderStage("PROCESSING");
       }
-    } catch {
+    } catch (error) {
       setIsAnimatingReply(false);
+      const detail =
+        error instanceof Error && error.message ? ` (${error.message})` : "";
       setMessages((previous) =>
         previous.map((message) =>
           message.id === placeholderId
             ? {
                 id: createId("assistant"),
                 role: "assistant",
-                content:
-                  "I’m having trouble reaching the kitchen system right now, but I’m still here to help. Could you repeat your order in one message?",
+                content: `I’m having trouble reaching the kitchen system right now, but I’m still here to help. Could you repeat your order in one message?${detail}`,
               }
             : message,
         ),
@@ -479,6 +521,10 @@ export default function KioskClientPage() {
     setIsAnimatingReply(false);
     setProcessingStep("");
     setOrderStage("GATHERING");
+  }
+
+  function closeMenuSidebar() {
+    setIsMenuSidebarOpen(false);
   }
 
   return (
@@ -501,6 +547,17 @@ export default function KioskClientPage() {
           <h1 className="mt-4 text-2xl font-semibold text-[var(--color-charcoal)]">
             CafeMo Kiosk
           </h1>
+          <button
+            type="button"
+            onClick={() => setIsMenuSidebarOpen((previous) => !previous)}
+            aria-expanded={isMenuSidebarOpen}
+            aria-controls="kiosk-menu-sidebar"
+            className="mt-3 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95"
+            style={{ backgroundColor: "#5b5fd0" }}
+          >
+            <ListIcon size={16} weight="bold" />
+            {isMenuSidebarOpen ? "Hide Menu" : "View Menu"}
+          </button>
           <p className="mt-2 text-sm text-[var(--color-charcoal)]/80">
             Stage: <span className="font-semibold">{orderStage}</span>
           </p>
@@ -526,7 +583,11 @@ export default function KioskClientPage() {
           )}
         </aside>
 
-        <div className="glass-card flex h-[70vh] min-h-0 flex-1 flex-col rounded-3xl p-4 md:p-6">
+        <div
+          className={`glass-card flex h-[70vh] min-h-0 flex-1 flex-col rounded-3xl p-4 transition-opacity md:p-6 ${
+            isMenuSidebarOpen ? "opacity-80" : "opacity-100"
+          }`}
+        >
           <div
             ref={scrollContainerRef}
             className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl p-4"
@@ -616,6 +677,100 @@ export default function KioskClientPage() {
           </form>
         </div>
       </section>
+
+      {isMenuSidebarOpen && (
+        <aside
+          id="kiosk-menu-sidebar"
+          className="fixed left-0 top-0 z-50 h-full w-full max-w-sm overflow-y-auto border-r border-white/35 bg-[#f7f2ec] p-5 shadow-[0_16px_38px_rgba(0,0,0,0.22)]"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-[var(--color-charcoal)]">
+              Menu
+            </h2>
+            <button
+              type="button"
+              onClick={closeMenuSidebar}
+              ref={menuCloseButtonRef}
+              className="rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-sm font-semibold text-[var(--color-charcoal)] transition hover:bg-[var(--surface)]"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-6 space-y-6">
+            <section>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--color-charcoal)]/70">
+                Beverages
+              </h3>
+              <div className="mt-3 space-y-4">
+                {beverages.map((group) => (
+                  <div
+                    key={group.category}
+                    className="rounded-xl bg-white/70 p-3"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--color-charcoal)]/70">
+                      {group.category}
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {group.items.map((item) => (
+                        <li
+                          key={`${group.category}-${item.name}`}
+                          className="text-sm text-[var(--color-charcoal)]"
+                        >
+                          <p className="font-semibold">{item.name}</p>
+                          <p className="text-xs text-[var(--color-charcoal)]/75">
+                            S {formatPrice(item.sizes.small)} • M{" "}
+                            {formatPrice(item.sizes.medium)} • L{" "}
+                            {formatPrice(item.sizes.large)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--color-charcoal)]/70">
+                Food
+              </h3>
+              <ul className="mt-3 space-y-2 rounded-xl bg-white/70 p-3">
+                {food.map((item) => (
+                  <li
+                    key={item.name}
+                    className="flex items-center justify-between gap-3 text-sm text-[var(--color-charcoal)]"
+                  >
+                    <span className="font-medium">{item.name}</span>
+                    <span className="shrink-0 font-semibold text-[var(--color-violet)]">
+                      {formatPrice(item.price)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--color-charcoal)]/70">
+                Add-ons
+              </h3>
+              <ul className="mt-3 space-y-2 rounded-xl bg-white/70 p-3">
+                {addOns.map((item) => (
+                  <li
+                    key={item.name}
+                    className="flex items-center justify-between gap-3 text-sm text-[var(--color-charcoal)]"
+                  >
+                    <span className="font-medium">{item.name}</span>
+                    <span className="shrink-0 font-semibold text-[var(--color-violet)]">
+                      {formatPrice(item.price)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+        </aside>
+      )}
     </main>
   );
 }

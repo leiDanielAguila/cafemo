@@ -1,5 +1,3 @@
-import menuData from "@/app/dashboard/kiosk/menu.json";
-
 export type MenuItem = {
   name: string;
   price: number;
@@ -25,6 +23,12 @@ export type MatchedMenuItem = {
   name: string;
   price: number;
   sizes?: BeverageSizes;
+};
+
+export type MenuData = {
+  beverages: BeverageGroup[];
+  food: MenuItem[];
+  addOns: MenuItem[];
 };
 
 type MatchCandidate = {
@@ -106,25 +110,6 @@ function toName(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function toMenuItem(value: unknown): MenuItem | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const name = toName(record.name);
-  const price = toFiniteNumber(record.price ?? record.prize);
-
-  if (!name || price === null) {
-    return null;
-  }
-
-  return {
-    name,
-    price,
-  };
-}
-
 function toBeverageSizes(value: unknown): BeverageSizes | null {
   const record = toRecord(value);
   if (!record) {
@@ -146,83 +131,167 @@ function toBeverageSizes(value: unknown): BeverageSizes | null {
   };
 }
 
-function toBeverageItem(value: unknown): BeverageItem | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
+type FoodRow = {
+  food_name: unknown;
+  price: unknown;
+};
 
-  const name = toName(record.name);
-  const sizes = toBeverageSizes(record.sizes);
+type AddOnRow = {
+  addons_name: unknown;
+  price: unknown;
+};
 
-  if (!name || !sizes) {
+type DrinkRow = {
+  drink_name: unknown;
+  drink_hot: unknown;
+  drink_size: unknown;
+  price: unknown;
+};
+
+type NormalizeMenuRowsInput = {
+  foodRows: FoodRow[];
+  drinkRows: DrinkRow[];
+  addOnRows: AddOnRow[];
+};
+
+function toMenuItemFromNameAndPrice(nameValue: unknown, priceValue: unknown) {
+  const name = toName(nameValue);
+  const price = toFiniteNumber(priceValue);
+
+  if (!name || price === null) {
     return null;
   }
 
   return {
     name,
-    sizes,
-  };
+    price,
+  } satisfies MenuItem;
 }
 
-function toBeverageGroup(value: unknown): BeverageGroup | null {
-  const record = toRecord(value);
-  if (!record) {
+function toNormalizedDrinkSize(value: unknown): keyof BeverageSizes | null {
+  if (typeof value !== "string") {
     return null;
   }
 
-  const category = toName(record.category);
-  const itemList = Array.isArray(record.items)
-    ? record.items
-        .map((item) => toBeverageItem(item))
-        .filter((item): item is BeverageItem => Boolean(item))
-    : [];
+  const normalized = normalizeLabel(value);
 
-  if (!category || itemList.length === 0) {
-    return null;
+  if (normalized === "small" || normalized === "s") {
+    return "small";
   }
+
+  if (normalized === "medium" || normalized === "m") {
+    return "medium";
+  }
+
+  if (normalized === "large" || normalized === "l") {
+    return "large";
+  }
+
+  return null;
+}
+
+export function normalizeMenuDataFromRows({
+  foodRows,
+  drinkRows,
+  addOnRows,
+}: NormalizeMenuRowsInput): MenuData {
+  const food = foodRows
+    .map((row) => toMenuItemFromNameAndPrice(row.food_name, row.price))
+    .filter((item): item is MenuItem => Boolean(item));
+
+  const addOns = addOnRows
+    .map((row) => toMenuItemFromNameAndPrice(row.addons_name, row.price))
+    .filter((item): item is MenuItem => Boolean(item));
+
+  const beverageAccumulator = new Map<
+    string,
+    {
+      name: string;
+      category: string;
+      sizes: Partial<BeverageSizes>;
+    }
+  >();
+
+  for (const row of drinkRows) {
+    const name = toName(row.drink_name);
+    const price = toFiniteNumber(row.price);
+    const size = toNormalizedDrinkSize(row.drink_size);
+    const isHot = typeof row.drink_hot === "boolean" ? row.drink_hot : null;
+
+    if (!name || price === null || !size || isHot === null) {
+      continue;
+    }
+
+    const category = isHot ? "Hot" : "Cold";
+    const key = `${normalizeLabel(name)}:${category.toLowerCase()}`;
+    const existing = beverageAccumulator.get(key);
+
+    if (!existing) {
+      beverageAccumulator.set(key, {
+        name,
+        category,
+        sizes: {
+          [size]: price,
+        },
+      });
+      continue;
+    }
+
+    existing.sizes[size] = price;
+  }
+
+  const beveragesByCategory = new Map<string, BeverageItem[]>();
+
+  for (const entry of beverageAccumulator.values()) {
+    const sizes = toBeverageSizes(entry.sizes);
+    if (!sizes) {
+      continue;
+    }
+
+    const item: BeverageItem = {
+      name: entry.name,
+      sizes,
+    };
+
+    const existing = beveragesByCategory.get(entry.category) ?? [];
+    existing.push(item);
+    beveragesByCategory.set(entry.category, existing);
+  }
+
+  const beverages: BeverageGroup[] = Array.from(beveragesByCategory.entries())
+    .map(([category, items]) => ({
+      category,
+      items: items.sort((first, second) =>
+        first.name.localeCompare(second.name),
+      ),
+    }))
+    .sort((first, second) => first.category.localeCompare(second.category));
 
   return {
-    category,
-    items: itemList,
+    beverages,
+    food: food.sort((first, second) => first.name.localeCompare(second.name)),
+    addOns: addOns.sort((first, second) =>
+      first.name.localeCompare(second.name),
+    ),
   };
 }
-
-const typedMenuData = toRecord(menuData);
-const typedMenuRoot = toRecord(typedMenuData?.menu);
-
-export const beverages = (
-  Array.isArray(typedMenuRoot?.beverages) ? typedMenuRoot.beverages : []
-)
-  .map((group) => toBeverageGroup(group))
-  .filter((group): group is BeverageGroup => Boolean(group));
-
-export const food = (
-  Array.isArray(typedMenuRoot?.food) ? typedMenuRoot.food : []
-)
-  .map((item) => toMenuItem(item))
-  .filter((item): item is MenuItem => Boolean(item));
-
-export const addOns = (
-  Array.isArray(typedMenuRoot?.add_ons) ? typedMenuRoot.add_ons : []
-)
-  .map((item) => toMenuItem(item))
-  .filter((item): item is MenuItem => Boolean(item));
 
 function toDisplayPrice(sizes: BeverageSizes) {
   return sizes.medium;
 }
 
-const flattenedBeverageMenuItems: MatchedMenuItem[] = beverages.flatMap(
-  (group) =>
-    group.items.map((item) => ({
-      name: item.name,
-      price: toDisplayPrice(item.sizes),
-      sizes: item.sizes,
-    })),
-);
+export function flattenMenuItems(menuData: MenuData): MatchedMenuItem[] {
+  const flattenedBeverageMenuItems: MatchedMenuItem[] =
+    menuData.beverages.flatMap((group) =>
+      group.items.map((item) => ({
+        name: item.name,
+        price: toDisplayPrice(item.sizes),
+        sizes: item.sizes,
+      })),
+    );
 
-const flattenedMenuItems = [...flattenedBeverageMenuItems, ...food, ...addOns];
+  return [...flattenedBeverageMenuItems, ...menuData.food, ...menuData.addOns];
+}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -281,7 +350,11 @@ export function formatPrice(price: number) {
   return `₱${price.toFixed(2)}`;
 }
 
-export function findTopMatchedMenuItemsByAppearance(text: string, limit = 3) {
+export function findTopMatchedMenuItemsByAppearance(
+  text: string,
+  menuItems: MatchedMenuItem[],
+  limit = 3,
+) {
   const normalizedText = normalizeLabel(text);
   if (!normalizedText) {
     return [];
@@ -289,7 +362,7 @@ export function findTopMatchedMenuItemsByAppearance(text: string, limit = 3) {
 
   const candidates: MatchCandidate[] = [];
 
-  for (const item of flattenedMenuItems) {
+  for (const item of menuItems) {
     const terms = getMatchTermsForItem(item);
 
     for (const term of terms) {

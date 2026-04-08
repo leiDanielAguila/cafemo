@@ -81,11 +81,20 @@ This project was created to satisfy the Finals requirement for the Intelligent S
 
 To run the app locally with Supabase integration:
 
-1. Create a Supabase project and get the `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
-2. Add them to your environment (e.g., `.env.local`) as `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-3. Verify `utils/supabase/client.ts` reads from the environment values.
+1. Create a Supabase project and get your project URL, publishable (anon) key, and service-role key.
+1. Add these environment variables in `.env.local`:
 
-Note: The repository includes Supabase helper files under `utils/supabase/` to help with client and server usage.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+1. Verify the Supabase helpers in `app/utils/supabase/` use those values.
+
+### Menu Data Source
+
+- Menu data is fetched from Supabase tables: `foods`, `drinks`, and `addons`.
+- Client-side views use TanStack Query cache to reuse fetched menu data across pages.
+- Chat prompt menu text is built server-side from Supabase and cached for 5 minutes to reduce repeated DB reads.
 
 ### Deployment
 

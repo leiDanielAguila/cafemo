@@ -1,19 +1,19 @@
+"use client";
+
 import Image from "next/image";
 import {
   BowlFoodIcon,
   CoffeeIcon,
   ImageSquareIcon,
   PlusCircleIcon,
-} from "@phosphor-icons/react/dist/ssr";
+} from "@phosphor-icons/react";
 import {
-  addOns,
-  beverages,
-  food,
   formatPrice,
   resolveMenuImagePath,
   type BeverageItem,
   type MenuItem,
 } from "@/app/lib/menu";
+import { useMenuDataQuery } from "@/app/lib/useMenuDataQuery";
 
 function MenuItemCard({ item }: { item: MenuItem }) {
   const imagePath = resolveMenuImagePath(item.name);
@@ -122,6 +122,11 @@ function BeverageGrid({ items }: { items: BeverageItem[] }) {
 }
 
 export default function MenuPage() {
+  const { data } = useMenuDataQuery();
+  const beverages = data?.beverages ?? [];
+  const food = data?.food ?? [];
+  const addOns = data?.addOns ?? [];
+
   return (
     <main className="px-4 pb-8 pt-6 md:px-8">
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
