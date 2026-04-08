@@ -1,4 +1,4 @@
-import menuData from "@/app/dashboard/kiosk/menu.json";
+import { addOns, beverages, food, formatPrice } from "@/app/lib/menu";
 import { NextResponse } from "next/server";
 
 type ApiChatMessage = {
@@ -8,20 +8,21 @@ type ApiChatMessage = {
 
 const FINALIZED_TOKEN = "[FINALIZED]";
 
-type MenuItem = {
-  name: string;
-  price: number;
-};
+const BEVERAGE_MENU_TEXT = beverages
+  .flatMap((group) => group.items)
+  .map(
+    (item) =>
+      `- ${item.name} (small: ${formatPrice(item.sizes.small)}, medium: ${formatPrice(item.sizes.medium)}, large: ${formatPrice(item.sizes.large)})`,
+  )
+  .join("\n");
 
-const MENU_ITEMS: MenuItem[] = [
-  ...menuData.menu.beverages.flatMap((group) => group.items),
-  ...menuData.menu.food,
-  ...menuData.menu.add_ons,
-];
+const NON_BEVERAGE_MENU_TEXT = [...food, ...addOns]
+  .map((item) => `- ${item.name} (${formatPrice(item.price)})`)
+  .join("\n");
 
-const MENU_TEXT = MENU_ITEMS.map(
-  (item) => `- ${item.name} ($${item.price.toFixed(2)})`,
-).join("\n");
+const MENU_TEXT = [BEVERAGE_MENU_TEXT, NON_BEVERAGE_MENU_TEXT]
+  .filter((text) => text.length > 0)
+  .join("\n");
 
 const SYSTEM_PROMPT = [
   "You are CAFEMO, a warm and concise kiosk ordering assistant.",

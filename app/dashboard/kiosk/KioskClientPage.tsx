@@ -9,6 +9,7 @@ import { mapSupabaseUserToProfile } from "@/app/lib/userProfile";
 import {
   findTopMatchedMenuItemsByAppearance,
   formatPrice,
+  normalizeLabel,
   resolveMenuImagePath,
 } from "@/app/lib/menu";
 import { createClient } from "@/app/utils/supabase/client";
@@ -18,7 +19,7 @@ type ChatRole = "user" | "assistant";
 
 type ChatMenuCard = {
   name: string;
-  price: number;
+  priceLabel: string;
   imagePath: string | null;
 };
 
@@ -67,12 +68,74 @@ function hasAssistantCancellationConfirmation(message: string) {
   );
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function toTitleCase(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function detectMentionedSize(
+  text: string,
+  itemName: string,
+): "small" | "medium" | "large" | null {
+  const normalizedText = normalizeLabel(text);
+  const normalizedItemName = normalizeLabel(itemName);
+
+  const beforePattern = new RegExp(
+    `(small|medium|large) ${escapeRegExp(normalizedItemName)}`,
+  );
+  const beforeMatch = normalizedText.match(beforePattern)?.[1];
+  if (
+    beforeMatch === "small" ||
+    beforeMatch === "medium" ||
+    beforeMatch === "large"
+  ) {
+    return beforeMatch;
+  }
+
+  const afterPattern = new RegExp(
+    `${escapeRegExp(normalizedItemName)} (small|medium|large)`,
+  );
+  const afterMatch = normalizedText.match(afterPattern)?.[1];
+  if (
+    afterMatch === "small" ||
+    afterMatch === "medium" ||
+    afterMatch === "large"
+  ) {
+    return afterMatch;
+  }
+
+  return null;
+}
+
 function createCardsForMessage(text: string): ChatMenuCard[] {
-  return findTopMatchedMenuItemsByAppearance(text, 3).map((item) => ({
-    name: item.name,
-    price: item.price,
-    imagePath: resolveMenuImagePath(item.name),
-  }));
+  return findTopMatchedMenuItemsByAppearance(text, 3).map((item) => {
+    if (!item.sizes) {
+      return {
+        name: item.name,
+        priceLabel: formatPrice(item.price),
+        imagePath: resolveMenuImagePath(item.name),
+      };
+    }
+
+    const detectedSize = detectMentionedSize(text, item.name);
+
+    if (detectedSize) {
+      return {
+        name: item.name,
+        priceLabel: `${toTitleCase(detectedSize)}: ${formatPrice(item.sizes[detectedSize])}`,
+        imagePath: resolveMenuImagePath(item.name),
+      };
+    }
+
+    return {
+      name: item.name,
+      priceLabel: `S ${formatPrice(item.sizes.small)} • M ${formatPrice(item.sizes.medium)} • L ${formatPrice(item.sizes.large)}`,
+      imagePath: resolveMenuImagePath(item.name),
+    };
+  });
 }
 
 export default function KioskClientPage() {
@@ -510,7 +573,7 @@ export default function KioskClientPage() {
                               {card.name}
                             </p>
                             <p className="mt-1 text-xs font-semibold text-[var(--color-violet)]">
-                              {formatPrice(card.price)}
+                              {card.priceLabel}
                             </p>
                           </article>
                         ))}

@@ -5,23 +5,32 @@ export type MenuItem = {
   price: number;
 };
 
-export type BeverageGroup = {
-  category: string;
-  items: MenuItem[];
+export type BeverageSizes = {
+  small: number;
+  medium: number;
+  large: number;
 };
 
-type MenuShape = {
-  menu: {
-    beverages: BeverageGroup[];
-    food: MenuItem[];
-    add_ons: MenuItem[];
-  };
+export type BeverageItem = {
+  name: string;
+  sizes: BeverageSizes;
+};
+
+export type BeverageGroup = {
+  category: string;
+  items: BeverageItem[];
+};
+
+export type MatchedMenuItem = {
+  name: string;
+  price: number;
+  sizes?: BeverageSizes;
 };
 
 type MatchCandidate = {
   start: number;
   end: number;
-  item: MenuItem;
+  item: MatchedMenuItem;
   termLength: number;
 };
 
@@ -65,17 +74,155 @@ const MATCH_ALIASES_BY_NORMALIZED_ITEM_NAME: Record<string, string[]> = {
   "plant-based milk": ["plant based milk"],
 };
 
-const typedMenuData = menuData as MenuShape;
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
 
-export const beverages = typedMenuData.menu.beverages;
-export const food = typedMenuData.menu.food;
-export const addOns = typedMenuData.menu.add_ons;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
 
-const flattenedMenuItems = [
-  ...beverages.flatMap((group) => group.items),
-  ...food,
-  ...addOns,
-];
+  return null;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function toName(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function toMenuItem(value: unknown): MenuItem | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const name = toName(record.name);
+  const price = toFiniteNumber(record.price ?? record.prize);
+
+  if (!name || price === null) {
+    return null;
+  }
+
+  return {
+    name,
+    price,
+  };
+}
+
+function toBeverageSizes(value: unknown): BeverageSizes | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const small = toFiniteNumber(record.small);
+  const medium = toFiniteNumber(record.medium);
+  const large = toFiniteNumber(record.large);
+
+  if (small === null || medium === null || large === null) {
+    return null;
+  }
+
+  return {
+    small,
+    medium,
+    large,
+  };
+}
+
+function toBeverageItem(value: unknown): BeverageItem | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const name = toName(record.name);
+  const sizes = toBeverageSizes(record.sizes);
+
+  if (!name || !sizes) {
+    return null;
+  }
+
+  return {
+    name,
+    sizes,
+  };
+}
+
+function toBeverageGroup(value: unknown): BeverageGroup | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const category = toName(record.category);
+  const itemList = Array.isArray(record.items)
+    ? record.items
+        .map((item) => toBeverageItem(item))
+        .filter((item): item is BeverageItem => Boolean(item))
+    : [];
+
+  if (!category || itemList.length === 0) {
+    return null;
+  }
+
+  return {
+    category,
+    items: itemList,
+  };
+}
+
+const typedMenuData = toRecord(menuData);
+const typedMenuRoot = toRecord(typedMenuData?.menu);
+
+export const beverages = (
+  Array.isArray(typedMenuRoot?.beverages) ? typedMenuRoot.beverages : []
+)
+  .map((group) => toBeverageGroup(group))
+  .filter((group): group is BeverageGroup => Boolean(group));
+
+export const food = (
+  Array.isArray(typedMenuRoot?.food) ? typedMenuRoot.food : []
+)
+  .map((item) => toMenuItem(item))
+  .filter((item): item is MenuItem => Boolean(item));
+
+export const addOns = (
+  Array.isArray(typedMenuRoot?.add_ons) ? typedMenuRoot.add_ons : []
+)
+  .map((item) => toMenuItem(item))
+  .filter((item): item is MenuItem => Boolean(item));
+
+function toDisplayPrice(sizes: BeverageSizes) {
+  return sizes.medium;
+}
+
+const flattenedBeverageMenuItems: MatchedMenuItem[] = beverages.flatMap(
+  (group) =>
+    group.items.map((item) => ({
+      name: item.name,
+      price: toDisplayPrice(item.sizes),
+      sizes: item.sizes,
+    })),
+);
+
+const flattenedMenuItems = [...flattenedBeverageMenuItems, ...food, ...addOns];
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -100,7 +247,7 @@ function hasOverlap(candidate: MatchCandidate, keptMatches: MatchCandidate[]) {
   );
 }
 
-function getMatchTermsForItem(item: MenuItem) {
+function getMatchTermsForItem(item: MatchedMenuItem) {
   const normalizedName = normalizeLabel(item.name);
   const aliases = MATCH_ALIASES_BY_NORMALIZED_ITEM_NAME[normalizedName] ?? [];
 
@@ -127,6 +274,10 @@ export function resolveMenuImagePath(itemName: string) {
 }
 
 export function formatPrice(price: number) {
+  if (typeof price !== "number" || !Number.isFinite(price)) {
+    return "—";
+  }
+
   return `₱${price.toFixed(2)}`;
 }
 
