@@ -11,6 +11,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import { Stepper } from "@mantine/core";
+import { useQueryClient } from "@tanstack/react-query";
 import { formatPrice } from "@/app/lib/menu";
 import {
   clearPendingOrderFromStorage,
@@ -18,6 +19,7 @@ import {
   savePendingOrderToStorage,
   type PendingOrder,
 } from "@/app/lib/orderFlow";
+import { USER_ORDERS_QUERY_KEY } from "@/app/lib/useUserOrdersQuery";
 import { useUserStore } from "@/app/lib/store/useUserStore";
 import { mapSupabaseUserToProfile } from "@/app/lib/userProfile";
 import { createClient } from "@/app/utils/supabase/client";
@@ -28,6 +30,7 @@ const DELIVERY_SECONDS = 10;
 export default function TrackOrderClientPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const queryClient = useQueryClient();
   const [active, setActive] = useState(0);
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   const [prepSecondsLeft, setPrepSecondsLeft] = useState(PREPARING_SECONDS);
@@ -151,6 +154,9 @@ export default function TrackOrderClientPage() {
         const data = (await response.json()) as { orderId?: string };
         setPersistedOrderId(data.orderId ?? null);
         clearPendingOrderFromStorage();
+        await queryClient.invalidateQueries({
+          queryKey: USER_ORDERS_QUERY_KEY,
+        });
       } catch (error) {
         hasPersistedRef.current = false;
         setPersistError(
@@ -164,7 +170,7 @@ export default function TrackOrderClientPage() {
     };
 
     persistOrder();
-  }, [isDelivered, pendingOrder]);
+  }, [isDelivered, pendingOrder, queryClient]);
 
   const preparingProgress =
     ((PREPARING_SECONDS - prepSecondsLeft) / PREPARING_SECONDS) * 100;

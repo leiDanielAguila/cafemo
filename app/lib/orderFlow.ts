@@ -19,6 +19,17 @@ export type PendingOrder = {
   createdAt: string;
 };
 
+export type DrinkTemperature = "hot" | "cold";
+
+export type OrderCatalogItem = {
+  itemType: OrderItemType;
+  itemId: number;
+  name: string;
+  unitPrice: number;
+  temperature?: DrinkTemperature;
+  size?: "small" | "medium" | "large";
+};
+
 export const PENDING_ORDER_STORAGE_KEY = "cafemo:pending-order";
 
 type DrinkSize = "small" | "medium" | "large";
@@ -378,6 +389,57 @@ const FOOD_BY_NAME = new Map(
 const ADDON_BY_NAME = new Map(
   ADDONS.map((addon) => [normalizeLabel(addon.name), addon]),
 );
+
+const DRINK_BY_ID = new Map(DRINKS.map((drink) => [drink.itemId, drink]));
+const FOOD_BY_ID = new Map(FOODS.map((food) => [food.itemId, food]));
+const ADDON_BY_ID = new Map(ADDONS.map((addon) => [addon.itemId, addon]));
+
+export function getOrderCatalogItemById(
+  itemType: OrderItemType,
+  itemId: number,
+): OrderCatalogItem | null {
+  if (itemType === "drink") {
+    const drink = DRINK_BY_ID.get(itemId);
+    if (!drink) {
+      return null;
+    }
+
+    return {
+      itemType: drink.itemType,
+      itemId: drink.itemId,
+      name: drink.name,
+      unitPrice: drink.unitPrice,
+      temperature: drink.hot ? "hot" : "cold",
+      size: drink.size,
+    };
+  }
+
+  if (itemType === "food") {
+    const food = FOOD_BY_ID.get(itemId);
+    if (!food) {
+      return null;
+    }
+
+    return {
+      itemType: food.itemType,
+      itemId: food.itemId,
+      name: food.name,
+      unitPrice: food.unitPrice,
+    };
+  }
+
+  const addon = ADDON_BY_ID.get(itemId);
+  if (!addon) {
+    return null;
+  }
+
+  return {
+    itemType: addon.itemType,
+    itemId: addon.itemId,
+    name: addon.name,
+    unitPrice: addon.unitPrice,
+  };
+}
 
 function hasOverlap(candidate: TokenMatch, accepted: TokenMatch[]) {
   return accepted.some(
