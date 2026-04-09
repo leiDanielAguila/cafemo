@@ -1,0 +1,10 @@
+import TrackOrderClientPage from "./TrackOrderClientPage";
+export default function TrackOrderPage() {
+  return (
+    <main className="px-4 pb-8 pt-6 md:px-8">
+      <section className="glass-card mx-auto w-full max-w-6xl rounded-3xl p-10 text-center">
+        <TrackOrderClientPage />
+      </section>
+    </main>
+  );
+}
