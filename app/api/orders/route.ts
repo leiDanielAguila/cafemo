@@ -14,8 +14,6 @@ type CreateOrderPayload = {
   items: OrderItemPayload[];
 };
 
-<<<<<<< HEAD
-=======
 type OrderRecord = {
   order_id: string;
   total_amount: number;
@@ -30,7 +28,6 @@ type OrderItemRecord = {
   price_at_purchase: number;
 };
 
->>>>>>> dev
 function isValidOrderPayload(payload: unknown): payload is CreateOrderPayload {
   if (!payload || typeof payload !== "object") {
     return false;
@@ -70,8 +67,6 @@ function isValidOrderPayload(payload: unknown): payload is CreateOrderPayload {
   });
 }
 
-<<<<<<< HEAD
-=======
 export async function GET() {
   try {
     const cookieStore = await cookies();
@@ -147,7 +142,6 @@ export async function GET() {
   }
 }
 
->>>>>>> dev
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as unknown;
