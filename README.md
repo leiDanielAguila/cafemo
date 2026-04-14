@@ -87,6 +87,7 @@ To run the app locally with Supabase integration:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `WEATHER_API_KEY`
 
 1. Verify the Supabase helpers in `app/utils/supabase/` use those values.
 
