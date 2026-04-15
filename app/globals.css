@@ -50,3 +50,18 @@ a {
   border: 1px solid color-mix(in srgb, var(--border) 88%, white 12%);
   box-shadow: 0 10px 30px rgba(72, 65, 73, 0.08);
 }
+
+@keyframes chat-suggestions-float-in {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-chat-suggestions-float-in {
+  animation: chat-suggestions-float-in 360ms ease-in forwards;
+}

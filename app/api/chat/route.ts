@@ -8,6 +8,21 @@ type ApiChatMessage = {
   content: string;
 };
 
+type ChatPersonalizationPayload = {
+  applyForCurrentMessage?: boolean;
+  weather?: {
+    temperature: number;
+    name: string;
+    region: string;
+    country: string;
+  };
+  preferences?: {
+    topDrinks?: string[];
+    topFoods?: string[];
+    preferredDrinkTemperature?: "hot" | "cold";
+  };
+};
+
 const FINALIZED_TOKEN = "[FINALIZED]";
 const MENU_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -136,9 +151,157 @@ function hasCancellationAcknowledgement(message: string) {
   );
 }
 
+function hasOpenEndedRecommendationIntent(message: string) {
+  const normalized = message.toLowerCase();
+  return /(surprise me|recommend|suggest|anything|something|whatever|you choose|up to you|what should i order|pick for me|today|cozy|comfort)/.test(
+    normalized,
+  );
+}
+
+function hasSpecificOrderIntent(message: string) {
+  const normalized = message.toLowerCase();
+  return /(americano|latte|cappuccino|hot chocolate|smoothie|croissant|burrito|panini|extra shot|plant-based milk|flavored syrup|small|medium|large|\b\d+\b)/.test(
+    normalized,
+  );
+}
+
+function normalizePersonalizationPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const applyForCurrentMessage = Boolean(record.applyForCurrentMessage);
+
+  const weatherRaw = record.weather;
+  const weather =
+    weatherRaw && typeof weatherRaw === "object"
+      ? (() => {
+          const weatherRecord = weatherRaw as Record<string, unknown>;
+          if (
+            typeof weatherRecord.temperature === "number" &&
+            Number.isFinite(weatherRecord.temperature) &&
+            typeof weatherRecord.name === "string" &&
+            typeof weatherRecord.region === "string" &&
+            typeof weatherRecord.country === "string"
+          ) {
+            return {
+              temperature: weatherRecord.temperature,
+              name: weatherRecord.name,
+              region: weatherRecord.region,
+              country: weatherRecord.country,
+            };
+          }
+
+          return undefined;
+        })()
+      : undefined;
+
+  const preferencesRaw = record.preferences;
+  const preferences =
+    preferencesRaw && typeof preferencesRaw === "object"
+      ? (() => {
+          const preferencesRecord = preferencesRaw as Record<string, unknown>;
+
+          const topDrinks = Array.isArray(preferencesRecord.topDrinks)
+            ? preferencesRecord.topDrinks
+                .filter((value): value is string => typeof value === "string")
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0)
+                .slice(0, 3)
+            : [];
+
+          const topFoods = Array.isArray(preferencesRecord.topFoods)
+            ? preferencesRecord.topFoods
+                .filter((value): value is string => typeof value === "string")
+                .map((value) => value.trim())
+                .filter((value) => value.length > 0)
+                .slice(0, 3)
+            : [];
+
+          const preferredDrinkTemperature: "hot" | "cold" | undefined =
+            preferencesRecord.preferredDrinkTemperature === "hot" ||
+            preferencesRecord.preferredDrinkTemperature === "cold"
+              ? preferencesRecord.preferredDrinkTemperature
+              : undefined;
+
+          if (
+            topDrinks.length === 0 &&
+            topFoods.length === 0 &&
+            !preferredDrinkTemperature
+          ) {
+            return undefined;
+          }
+
+          return {
+            topDrinks,
+            topFoods,
+            preferredDrinkTemperature,
+          };
+        })()
+      : undefined;
+
+  if (!weather && !preferences && !applyForCurrentMessage) {
+    return null;
+  }
+
+  return {
+    applyForCurrentMessage,
+    weather,
+    preferences,
+  };
+}
+
+function buildPersonalizationPrompt(payload: {
+  weather?: {
+    temperature: number;
+    name: string;
+    region: string;
+    country: string;
+  };
+  preferences?: {
+    topDrinks: string[];
+    topFoods: string[];
+    preferredDrinkTemperature?: "hot" | "cold";
+  };
+}) {
+  const lines = [
+    "Personalization context for this turn:",
+    "- Use this context only when the user request is broad/non-specific (for example: surprise me, recommend something, pick for me).",
+    "- If the user asks for a specific item, size, or quantity, ignore this personalization context.",
+  ];
+
+  if (payload.weather) {
+    lines.push(
+      `- Current weather: ${payload.weather.temperature.toFixed(1)}°C in ${payload.weather.name}, ${payload.weather.region}, ${payload.weather.country}.`,
+    );
+  }
+
+  if (payload.preferences?.topDrinks.length) {
+    lines.push(
+      `- Frequent drinks: ${payload.preferences.topDrinks.join(", ")}.`,
+    );
+  }
+
+  if (payload.preferences?.topFoods.length) {
+    lines.push(`- Frequent food: ${payload.preferences.topFoods.join(", ")}.`);
+  }
+
+  if (payload.preferences?.preferredDrinkTemperature) {
+    lines.push(
+      `- Preferred drink temperature: ${payload.preferences.preferredDrinkTemperature}.`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { messages?: ApiChatMessage[] };
+    const body = (await request.json()) as {
+      messages?: ApiChatMessage[];
+      personalization?: ChatPersonalizationPayload;
+    };
 
     if (!Array.isArray(body.messages) || body.messages.length === 0) {
       return NextResponse.json(
@@ -173,6 +336,16 @@ export async function POST(request: Request) {
     const cancellationRequested = latestUserMessage
       ? hasCancellationIntent(latestUserMessage.content)
       : false;
+    const personalization = normalizePersonalizationPayload(
+      body.personalization,
+    );
+
+    const userMessageContent = latestUserMessage?.content ?? "";
+    const shouldUsePersonalization =
+      Boolean(personalization) &&
+      !hasSpecificOrderIntent(userMessageContent) &&
+      (Boolean(personalization?.applyForCurrentMessage) ||
+        hasOpenEndedRecommendationIntent(userMessageContent));
 
     const groqApiKey = process.env.GROQ_API_KEY;
     if (!groqApiKey) {
@@ -182,7 +355,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const systemPrompt = await getSystemPrompt();
+    const baseSystemPrompt = await getSystemPrompt();
+    const systemPrompt =
+      shouldUsePersonalization && personalization
+        ? `${baseSystemPrompt}\n\n${buildPersonalizationPrompt({
+            weather: personalization.weather,
+            preferences: personalization.preferences,
+          })}`
+        : baseSystemPrompt;
 
     const groqResponse = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
