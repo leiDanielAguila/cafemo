@@ -122,6 +122,20 @@ function normalizeReply(rawReply: string) {
   };
 }
 
+function hasCancellationIntent(message: string) {
+  const normalized = message.toLowerCase();
+  return /(cancel|cancell?ed|canceled|don'?t (want to )?(order|continue|proceed)|do not (want to )?(order|continue|proceed)|won'?t order|wont order|stop (the )?order|abort (the )?order|never mind|nevermind|forget it|no( more)? order)/.test(
+    normalized,
+  );
+}
+
+function hasCancellationAcknowledgement(message: string) {
+  const normalized = message.toLowerCase();
+  return /(order (is )?(cancelled|canceled)|canceled this order|cancelled this order|stopped this order|stop this order|won'?t proceed|will not proceed|won'?t place the order|will not place the order)/.test(
+    normalized,
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { messages?: ApiChatMessage[] };
@@ -152,6 +166,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    const latestUserMessage = [...safeMessages]
+      .reverse()
+      .find((message) => message.role === "user");
+    const cancellationRequested = latestUserMessage
+      ? hasCancellationIntent(latestUserMessage.content)
+      : false;
 
     const groqApiKey = process.env.GROQ_API_KEY;
     if (!groqApiKey) {
@@ -210,10 +231,18 @@ export async function POST(request: Request) {
     const isMenuCorrectionReply =
       replyLower.includes("not on the menu") ||
       replyLower.includes("choose from the menu");
+    const isCancellationReply = hasCancellationAcknowledgement(
+      normalized.reply,
+    );
 
     return NextResponse.json({
       reply: normalized.reply,
-      isFinalized: normalized.isFinalized && !isMenuCorrectionReply,
+      isFinalized:
+        normalized.isFinalized &&
+        !isMenuCorrectionReply &&
+        !cancellationRequested &&
+        !isCancellationReply,
+      isCancelled: cancellationRequested || isCancellationReply,
     });
   } catch {
     return NextResponse.json(

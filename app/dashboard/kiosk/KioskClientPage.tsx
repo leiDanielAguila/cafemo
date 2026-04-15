@@ -75,14 +75,14 @@ function hasAssistantOrderCompletionCue(message: string) {
 
 function hasCancelOrderIntent(message: string) {
   const normalized = message.toLowerCase();
-  return /(cancel|cancell?ed|don'?t proceed|do not proceed|not proceed|stop order|abort order|never mind|nevermind|forget it)/.test(
+  return /(cancel|cancell?ed|canceled|don'?t (want to )?(order|continue|proceed)|do not (want to )?(order|continue|proceed)|won'?t order|wont order|stop (the )?order|abort (the )?order|never mind|nevermind|forget it|no( more)? order)/.test(
     normalized,
   );
 }
 
 function hasAssistantCancellationConfirmation(message: string) {
   const normalized = message.toLowerCase();
-  return /(order (is )?(cancelled|canceled)|canceled this order|cancelled this order)/.test(
+  return /(order (is )?(cancelled|canceled)|canceled this order|cancelled this order|stopped this order|stop this order|won'?t proceed|will not proceed|won'?t place the order|will not place the order)/.test(
     normalized,
   );
 }
@@ -528,6 +528,7 @@ export default function KioskClientPage() {
       const data = (await response.json()) as {
         reply?: string;
         isFinalized?: boolean;
+        isCancelled?: boolean;
       };
 
       const assistantReply =
@@ -554,7 +555,12 @@ export default function KioskClientPage() {
         }),
       );
 
-      if (hasAssistantCancellationConfirmation(assistantReply)) {
+      const cancellationDetected =
+        Boolean(data.isCancelled) ||
+        hasCancelOrderIntent(userContent) ||
+        hasAssistantCancellationConfirmation(assistantReply);
+
+      if (cancellationDetected) {
         setOrderStage("CANCELLED");
         return;
       }
@@ -563,7 +569,7 @@ export default function KioskClientPage() {
         .filter((message) => message.role === "user")
         .some((message) => hasExplicitOrderConfirmation(message.content));
       const shouldFinalizeOrder =
-        data.isFinalized ||
+        (data.isFinalized && !cancellationDetected) ||
         (confirmedInHistory && hasAssistantOrderCompletionCue(assistantReply));
 
       if (shouldFinalizeOrder) {
